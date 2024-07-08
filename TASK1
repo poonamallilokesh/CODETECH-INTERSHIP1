@@ -1,0 +1,79 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from tensorflow.keras.models import Sequential, Model
+from tensorflow.keras.layers import Dense, Reshape, Flatten, Input
+from tensorflow.keras.layers import BatchNormalization, Activation, Dropout
+from tensorflow.keras.layers import Conv2D, Conv2DTranspose
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras import backend as K
+from tensorflow.keras.datasets import mnist
+def build_generator(latent_dim, img_shape):
+    model = Sequential()  
+    model.add(Dense(128 * 7 * 7, input_dim=latent_dim))
+    model.add(Activation('relu'))
+    model.add(Reshape((7, 7, 128)))
+    model.add(BatchNormalization())
+    model.add(Conv2DTranspose(64, (5, 5), strides=(2, 2), padding='same'))
+    model.add(Activation('relu'))
+    model.add(BatchNormalization())
+    model.add(Conv2DTranspose(img_shape[2], (5, 5), strides=(2, 2), padding='same'))
+    model.add(Activation('tanh'))
+    model.summary()
+    noise = Input(shape=(latent_dim,))
+    img = model(noise)
+    return Model(noise, img)
+def build_discriminator(img_shape):
+    model = Sequential()
+    model.add(Conv2D(64, (5, 5), strides=(2, 2), padding='same', input_shape=img_shape))
+    model.add(Activation('relu'))
+    model.add(Dropout(0.3))
+    model.add(Conv2D(128, (5, 5), strides=(2, 2), padding='same'))
+    model.add(Activation('relu'))
+    model.add(Dropout(0.3))
+    model.add(Flatten())
+    model.add(Dense(1))
+    model.add(Activation('sigmoid'))
+    model.summary()
+    img = Input(shape=img_shape)
+    validity = model(img)
+    return Model(img, validity)
+def build_gan(generator, discriminator):
+    discriminator.trainable = False
+    gan_input = Input(shape=(latent_dim,))
+    generated_img = generator(gan_input)
+    gan_output = discriminator(generated_img)
+    gan = Model(gan_input, gan_output)
+    gan.compile(loss='binary_crossentropy', optimizer=Adam(), metrics=['accuracy'])
+    return gan
+def load_data():
+    (X_train, _), (_, _) = mnist.load_data()
+    X_train = X_train / 127.5 - 1.
+    X_train = np.expand_dims(X_train, axis=-1)
+    return X_train
+def train_gan(generator, discriminator, gan, X_train, latent_dim, epochs, batch_size):
+    for epoch in range(epochs):
+        noise = np.random.normal(0, 1, (batch_size, latent_dim))
+        generated_images = generator.predict(noise)
+        idx = np.random.randint(0, X_train.shape[0], batch_size)
+        real_images = X_train[idx]
+        y_real = np.ones((batch_size, 1))
+        y_fake = np.zeros((batch_size, 1))
+        d_loss_real = discriminator.train_on_batch(real_images, y_real)
+        d_loss_fake = discriminator.train_on_batch(generated_images, y_fake)
+        d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+        noise = np.random.normal(0, 1, (batch_size, latent_dim))
+        g_loss = gan.train_on_batch(noise, y_real)
+        print(f"Epoch {epoch}, Discriminator Loss: {d_loss[0]}, Generator Loss: {g_loss}")
+img_rows = 28
+img_cols = 28
+channels = 1
+img_shape = (img_rows, img_cols, channels)
+latent_dim = 100
+epochs =100
+batch_size = 32
+discriminator = build_discriminator(img_shape)
+discriminator.compile(loss='binary_crossentropy', optimizer=Adam(), metrics=['accuracy'])
+generator = build_generator(latent_dim, img_shape)
+gan = build_gan(generator, discriminator)
+X_train = load_data()
+train_gan(generator, discriminator, gan, X_train, latent_dim, epochs, batch_size)
